@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <title>Media Player</title>
+  <link rel="stylesheet" href="https://cdn.plyr.io/3.7.8/plyr.css" />
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      width: 100%;
+      min-height: 100vh;
+      font-family: sans-serif;
+      display: block;
+      overflow-x: hidden;
+    }
+
+    /* Inputs ocultos (atajos: V video, S subtítulos) */
+    input[type="file"] { display: none; }
+
+    #videoContainer {
+      position: relative;
+
+    /* 👇 CLAVE: forzar 16:9 real del TV */
+      width: 100vw;
+      height: 56.25vw; /* 16:9 */
+      max-height: 100vh;
+      max-width: 177.78vh; /* mantiene proporción */
+      margin: auto;
+      background: black;
+    }
+
+    /* ===== PLYR - tamaños reales (sin scale) ===== */
+    .plyr {
+      position: relative;
+      height: 100%;
+      --plyr-color-main: #00b7ff;
+
+      /* Base grandes */
+      --plyr-font-size-base: 16px;
+      --plyr-font-size-time: 18px;        /* tiempos (actual/restante) */
+      --plyr-control-icon-size: 28px;
+      --plyr-control-spacing: 14px;
+      --plyr-control-padding: 10px;
+
+      /* Barra de progreso gruesa */
+      --plyr-range-track-height: 10px;
+      --plyr-range-thumb-height: 18px;
+    }
+
+    .plyr__controls {
+      position: absolute;
+      bottom: 0; left: 0; width: 100%;
+      padding: 16px 14px;
+      gap: 12px;
+      min-height: 68px;
+      display: flex; align-items: center;
+      box-sizing: border-box;
+    }
+
+    .plyr__control { width: 44px; height: 44px; box-sizing: border-box; }
+    .plyr__control svg { width: 28px !important; height: 28px !important; }
+
+    /* Tiempos bien legibles */
+    .plyr__time, .plyr__menu__value {
+      font-size: var(--plyr-font-size-time);
+      line-height: 1;
+    }
+
+    /* Progreso alto acorde al grosor */
+    .plyr__progress { height: 26px; display: flex; align-items: center; }
+    .plyr__progress input[type=range] { height: 22px; }
+
+    /* === Indicador de tiempo sobre la barra (como tu versión previa) === */
+    .plyr__progress .plyr__time-indicator {
+      position: absolute;
+      bottom: 30px;                 /* ajusta si lo quieres más bajo */
+      left: 0;
+      transform: translateX(-50%);
+      font-size: 17px;
+      color: #000;                  /* texto negro */
+      background: #fff;             /* fondo blanco */
+      padding: 4px 8px;
+      border-radius: 6px;
+      pointer-events: none;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity .3s ease;
+    }
+
+    .plyr__progress .plyr__time-indicator::after {
+      content:"";
+      position:absolute;
+      bottom:-6px;
+      left:50%;
+      transform:translateX(-50%);
+      border-width:6px 6px 0 6px;
+      border-style:solid;
+      border-color:#fff transparent transparent transparent; /* punta blanca */
+    }
+
+    .plyr--hover .plyr__progress .plyr__time-indicator { opacity: 1; }
+
+    #videoContainer video {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  background: #000;
+
+  /* 🔥 AÑADIR ESTO */
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+    .plyr__captions {
+      font-size: 2em !important;
+      color: yellow !important;
+      text-shadow: 1px 1px 2px black !important;
+      background: transparent !important;
+    }
+    ::cue {
+      color: yellow; background: transparent; font-size: 1.3em;
+      font-family: Arial, sans-serif; text-shadow: 1px 1px 2px black;
+    }
+
+    .overlay-icon {
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%) scale(0.6);
+      opacity: 0; transition: opacity .3s ease, transform .3s ease;
+      pointer-events: none; z-index: 10;
+    }
+    .overlay-icon.show { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+
+    /* ===== Banner superior tipo Netflix ===== */
+    .title-banner{
+  position:absolute; top:0; left:0; right:0;
+  padding:22px 26px 28px;
+
+  /* ❌ sin fondo, sin sombra, sin blur */
+
+  color:#fff;
+  font-size:24px;
+  font-weight:700;
+  letter-spacing:.4px;
+  line-height:1.2;
+
+  opacity:0;
+  transform: translateY(-14px);
+  transition:
+    opacity .25s linear,
+    transform .25s linear;
+
+  pointer-events:none;
+  z-index:15;
+  white-space:nowrap;
+  text-overflow:ellipsis;
+  overflow:hidden;
+}
+
+
+    .plyr--hover .title-banner, .title-banner.show { opacity:1; transform:translateY(0); }
+    .plyr--hide-controls .title-banner{ opacity:0 !important; transform:translateY(-8px) !important; }
+
+    /* ===== Pantalla completa: todo más grande ===== */
+    .plyr--fullscreen,
+    :fullscreen .plyr {
+      --plyr-font-size-base: 17px;
+      --plyr-font-size-time: 19px;
+      --plyr-control-icon-size: 32px;
+      --plyr-control-spacing: 16px;
+      --plyr-control-padding: 12px;
+
+      --plyr-range-track-height: 12px;
+      --plyr-range-thumb-height: 20px;
+    }
+
+    .plyr--fullscreen .plyr__controls,
+    :fullscreen .plyr__controls {
+      padding: 18px 16px;
+      min-height: 76px;
+      gap: 14px;
+    }
+
+    .plyr--fullscreen .plyr__control,
+    :fullscreen .plyr__control { width: 48px; height: 48px; }
+    .plyr--fullscreen .plyr__control svg,
+    :fullscreen .plyr__control svg { width: 32px !important; height: 32px !important; }
+
+    .plyr--fullscreen .plyr__progress,
+    :fullscreen .plyr__progress { height: 30px; }
+    .plyr--fullscreen .plyr__progress input[type=range],
+    :fullscreen .plyr__progress input[type=range] { height: 26px; }
+
+    .plyr--fullscreen .plyr__progress .plyr__time-indicator,
+    :fullscreen .plyr__progress .plyr__time-indicator {
+      bottom: 30px;           /* tu valor actual para fullscreen */
+      font-size: 18px;
+      padding: 5px 9px;
+    }
+
+    .plyr--fullscreen .title-banner,
+    :fullscreen .title-banner {
+      padding: 24px 28px 28px;
+      font-size: 28px;
+      transform: translateY(-10px);
+    }
+/* ==========================================================================
+   SOLUCIÓN DEFINITIVA: ANULAR EL ANCHO FIJO DEL BOTÓN "VOLVER"
+   ========================================================================== */
+.plyr--fullscreen .plyr__menu__container .plyr__control--back,
+:fullscreen .plyr__menu__container .plyr__control--back {
+    width: 90% !important;
+}
+
+    /* ====== AJUSTES ANTI-FOCO (para quitar el rayado) ====== */
+    .plyr__controls button:focus,
+    .plyr__controls input:focus {
+      outline: none;
+      box-shadow: none;
+    }
+    /* Firefox: quita halo extra del range */
+    .plyr__progress input[type="range"]::-moz-focus-outer { border: 0; }
+
+    /* Unifica el tooltip de búsqueda con el globito (mismo estilo/tamaño) */
+    .plyr{
+      /* colores y medidas del tooltip nativo de Plyr */
+      --plyr-tooltip-radius: 6px;
+      --plyr-tooltip-padding: 4px 8px;
+      --plyr-tooltip-arrow-size: 6px;
+      --plyr-tooltip-shadow: none;
+      --plyr-font-size-small: 17px; /* tamaño del número del tooltip */
+    }
+
+    /* Colócalo a la misma altura que tu time-indicator */
+    .plyr__progress .plyr__tooltip{
+      top: auto !important;
+      bottom: 18px !important;     /* MISMA altura que tu .plyr__time-indicator */
+      transform: translate(-50%, 0) !important;
+      z-index: 12;
+    }
+
+    /* En fullscreen, mantén la misma alineación (ajusta si cambias tu indicador) */
+    .plyr--fullscreen .plyr__progress .plyr__tooltip,
+    :fullscreen .plyr__progress .plyr__tooltip{
+      top: auto !important;
+      bottom: 20px !important;     /* usa el mismo valor que tengas para fullscreen */
+      transform: translate(-50%, 0) !important;
+    }
+
+    /* Tooltip nativo de Plyr: estilo blanco y misma altura */
+    .plyr {
+      --plyr-tooltip-background: #fff;
+      --plyr-tooltip-color: #000;
+      --plyr-tooltip-radius: 6px;
+      --plyr-tooltip-padding: 4px 8px;
+      --plyr-tooltip-arrow-size: 6px;
+      --plyr-tooltip-shadow: none;
+      --plyr-font-size-small: 17px;
+    }
+
+    .plyr__progress .plyr__tooltip{
+      top: auto !important;
+      bottom: 17px !important;
+      transform: translate(-50%, 0) !important;
+      z-index: 12;
+    }
+
+    /* === FULLSCREEN: igualar tamaño y altura del tooltip con el globito === */
+    .plyr--fullscreen,
+    :fullscreen .plyr{
+      /* el tooltip de Plyr usa estas variables */
+      --plyr-font-size-small: 18px;   /* igual que tu time-indicator */
+      --plyr-tooltip-padding: 5px 9px;/* igual que tu time-indicator */
+      --plyr-tooltip-arrow-size: 6px; /* misma punta */
+    }
+
+    .plyr--fullscreen .plyr__progress .plyr__tooltip,
+    :fullscreen .plyr__progress .plyr__tooltip{
+      bottom: 18px !important;        /* MISMA altura que .plyr__time-indicator en fullscreen */
+      transform: translate(-50%, 0) !important;
+    }
+
+    /* Ocultar el indicador de tiempo transcurrido mientras se busca (drag) */
+    .plyr--seeking .plyr__time-indicator {
+      opacity: 0 !important;
+    }
+
+    /* Ocultar también cuando SOLO pasas por la barra (hover/scrub) */
+    .plyr--scrubbing .plyr__time-indicator {
+      opacity: 0 !important;
+    }
+
+    /* ===== Settings visibles y por encima de todo (fix corte en fullscreen) ===== */
+    .plyr__controls{ overflow: visible; z-index: 20; }
+    .plyr__menu, .plyr__menu__container{ z-index: 50; }
+    .plyr--fullscreen .plyr__controls{ z-index: 60; }
+    .plyr--fullscreen .plyr__menu__container{ z-index: 70; }
+    /* Menú sin scroll innecesario */
+    .plyr__menu__container{
+      max-height: none !important;
+      overflow: visible !important;
+    }
+
+    /* Distribuir título y valor a la derecha en cada opción del menú */
+    .plyr__menu__container [role="menu"] button{
+      display: flex !important;
+      align-items: center !important;
+      justify-content: space-between !important;
+      gap: 12px !important;
+      width: 100% !important;
+    }
+
+    .plyr__menu__container .plyr__menu__value{
+      flex: 0 0 auto !important;
+      max-width: 60% !important;
+      overflow: hidden !important;
+      text-overflow: ellipsis !important;
+      white-space: nowrap !important;
+      text-align: right !important;
+    }
+
+    /* ——— Fix: que no se corte “Español” en el menú ——— */
+    .plyr__menu__container [role="menu"] button{
+      padding-right: 28px !important;   /* espacio para la flecha del submenú */
+    }
+
+    .plyr__menu__container .plyr__menu__value{
+      flex: 0 1 auto !important;        /* que pueda crecer un poco si lo necesita */
+      max-width: none !important;       /* quitar el límite del 60% que lo truncaba */
+      overflow: visible !important;     /* no esconder el último carácter */
+      white-space: nowrap !important;   /* que siga en una sola línea */
+    }
+    /* 🔥 Optimización UI para Chromecast */
+.plyr, .overlay-icon, .title-banner {
+  will-change: opacity, transform;
+}
+  </style>
+</head>
+<body>
+
+  <!-- Sin título duplicado fuera del reproductor -->
+  <input type="file" id="fileInput" accept="video/mp4,video/x-matroska,video/webm" />
+  <input type="file" id="subtitleFile" accept=".srt" />
+
+  <div id="videoContainer">
+    <video id="player" controls crossorigin playsinline preload="auto">
+      <track id="subtitleTrack" kind="subtitles" label="Español" srclang="es" default />
+    </video>
+
+    <!-- Banner de título -->
+    <div class="title-banner" id="titleBanner">
+      <span id="videoTitle">Media Player</span>
+    </div>
+
+    <div id="playPauseOverlay" class="overlay-icon">
+      <svg id="overlayIcon" viewBox="0 0 24 24" fill="white" width="72" height="72"></svg>
+    </div>
+  </div>
+
+  <script src="https://cdn.plyr.io/3.7.8/plyr.polyfilled.js"></script>
+  <script>
+    const player = new Plyr('#player', {
+      captions: { active: true, language: 'es', update: true },
+      invertTime: true, // tiempo restante en negativo
+      controls: ['play','progress','current-time','mute','volume','captions','settings','fullscreen'],
+      settings: ['captions','speed'],
+      speed: { selected: 1, options: [0.5, 0.75, 1, 1.25, 1.5, 2] }
+    });
+
+    const fileInput = document.getElementById('fileInput');
+    const subtitleInput = document.getElementById('subtitleFile');
+    const video = document.getElementById('player');
+    const track = document.getElementById('subtitleTrack');
+    const overlay = document.getElementById('playPauseOverlay');
+    const overlayIcon = document.getElementById('overlayIcon');
+    const titleBanner = document.getElementById('titleBanner');
+    const videoTitleEl = document.getElementById('videoTitle');
+    const videoContainer = document.getElementById('videoContainer');
+
+    // ====== AUDIO WEB API: Boost + Normalización ======
+    let audioCtx, sourceNode, gainNode, compressorNode;
+    let voiceEQ;
+    let musicReducer;
+    let smartLimiter;
+    let isBoostOn = false, isNormalizeOn = false;
+
+    function setupAudioContext() {
+      if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+        // Fuente desde el <video>
+        sourceNode = audioCtx.createMediaElementSource(video);
+
+	voiceEQ = audioCtx.createBiquadFilter();
+	voiceEQ.type = "peaking";
+	voiceEQ.frequency.setValueAtTime(3000, audioCtx.currentTime);
+	voiceEQ.Q.setValueAtTime(1.2, audioCtx.currentTime);
+	voiceEQ.gain.setValueAtTime(4, audioCtx.currentTime);
+
+	musicReducer = audioCtx.createBiquadFilter();
+	musicReducer.type = "lowshelf";
+	musicReducer.frequency.setValueAtTime(200, audioCtx.currentTime);
+	musicReducer.gain.setValueAtTime(-6, audioCtx.currentTime);
+
+        // Compresor para "normalización"
+        compressorNode = audioCtx.createDynamicsCompressor();
+	smartLimiter = audioCtx.createDynamicsCompressor();
+	smartLimiter.threshold.setValueAtTime(-12, audioCtx.currentTime);
+	smartLimiter.knee.setValueAtTime(10, audioCtx.currentTime);
+	smartLimiter.ratio.setValueAtTime(6, audioCtx.currentTime);
+	smartLimiter.attack.setValueAtTime(0.003, audioCtx.currentTime);
+	smartLimiter.release.setValueAtTime(0.25, audioCtx.currentTime);
+
+        // Ajustes suaves y seguros
+        compressorNode.threshold.setValueAtTime(-20, audioCtx.currentTime);
+	compressorNode.knee.setValueAtTime(18, audioCtx.currentTime);
+	compressorNode.ratio.setValueAtTime(4, audioCtx.currentTime);
+	compressorNode.attack.setValueAtTime(0.01, audioCtx.currentTime);
+	compressorNode.release.setValueAtTime(0.35, audioCtx.currentTime);
+
+        // Ganancia (para boost)
+        gainNode = audioCtx.createGain();
+        gainNode.gain.value = 1;
+
+        // Conexión inicial (sin normalizar)
+        connectGraph();
+      }
+    }
+
+    function connectGraph() {
+      if (!audioCtx || !sourceNode || !gainNode) return;
+
+      // Limpia conexiones previas
+      try { sourceNode.disconnect(); } catch(_) {}
+      try { musicReducer?.disconnect(); } catch(_) {}
+      try { voiceEQ?.disconnect(); } catch(_) {}      
+      try { compressorNode?.disconnect(); } catch(_) {}
+      try { smartLimiter?.disconnect(); } catch(_) {}
+      try { gainNode.disconnect(); } catch(_) {}
+
+      if (isNormalizeOn && compressorNode) {
+  	sourceNode.connect(musicReducer);
+	musicReducer.connect(voiceEQ);
+	voiceEQ.connect(compressorNode);
+	compressorNode.connect(smartLimiter);
+        smartLimiter.connect(gainNode);
+      } else {
+	sourceNode.connect(musicReducer);
+	musicReducer.connect(voiceEQ);
+	voiceEQ.connect(gainNode);
+      }
+
+      gainNode.connect(audioCtx.destination);
+    }
+    // Reanuda contexto si está suspendido por políticas de autoplay
+    video.addEventListener('play', () => {
+      if (audioCtx && audioCtx.state === 'suspended') audioCtx.resume();
+    }, { passive: true });
+
+    function setBannerTitleFromFile(fileName){
+      const title = fileName ? fileName.replace(/\.[^/.]+$/, '') : 'Sin título';
+      videoTitleEl.textContent = title;
+    }
+
+    // ===== Carga de video =====
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        if (video.src && video.src.startsWith('blob:')) URL.revokeObjectURL(video.src);
+        const url = URL.createObjectURL(file);
+        video.src = url;
+        video.style.imageRendering = "auto";
+        video.disablePictureInPicture = true;
+        video.load();
+        player.play();
+
+        if (track.src && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+        track.removeAttribute('src');
+
+        // Reset de efectos
+        if (isBoostOn) toggleBoostOff();
+        if (isNormalizeOn) toggleNormalizeOff();
+
+        setBannerTitleFromFile(file.name);
+        titleBanner.classList.add('show');
+        clearTimeout(showBanner._timeout);
+        showBanner._timeout = setTimeout(() => titleBanner.classList.remove('show'), 1500);
+      }
+    });
+
+    // ===== Carga de subtítulos =====
+    subtitleInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file && file.name.endsWith('.srt')) {
+        const reader = new FileReader();
+        reader.onload = function(event) {
+          let srtText = event.target.result.replace(/\{\\.*?\}/g, '');
+          const vttText = "WEBVTT\n\n" + srtText
+            .replace(/\r+/g, '')
+            .replace(/^\s+|\s+$/g, '')
+            .replace(/(\d+)\n(\d{2}:\d{2}:\d{2}),(\d{3}) --> (\d{2}:\d{2}:\d{2}),(\d{3})/g,
+              '$1\n$2.$3 --> $4.$5');
+
+          if (track.src && track.src.startsWith('blob:')) URL.revokeObjectURL(track.src);
+          const vttUrl = URL.createObjectURL(new Blob([vttText], { type: "text/vtt" }));
+          track.src = vttUrl;
+
+          /* === Mostrar nombre del subtítulo en el menú === */
+          const niceLabel = (file.name.replace(/\.[^/.]+$/, '') || 'Subtítulos').slice(0, 60);
+          track.label = niceLabel;
+          track.srclang = track.srclang || 'es';
+          track.default = true;
+
+          // activar y mostrar
+          video.textTracks[0].mode = 'showing';
+          player.captions.active = true;
+
+          // refrescar el valor que muestra el botón de captions en el menú
+          requestAnimationFrame(() => {
+            const valueSpan = player.elements.container
+              .querySelector('.plyr__menu [data-plyr="captions"] .plyr__menu__value');
+            if (valueSpan) valueSpan.textContent = niceLabel;
+          });
+        };
+        reader.readAsText(file);
+      }
+    });
+
+    // ====== BOTONES BOOST y NORMALIZAR ======
+    function toggleBoostOn() { setupAudioContext(); gainNode.gain.value = 2;  boostBtn.style.color = '#0f0'; isBoostOn = true; }
+    function toggleBoostOff(){ if (!gainNode) return; gainNode.gain.value = 1; boostBtn.style.color = '';    isBoostOn = false; }
+
+    function toggleNormalizeOn()  { setupAudioContext(); isNormalizeOn = true;  connectGraph(); normalizeBtn.style.color = '#0f0'; }
+    function toggleNormalizeOff() { if (!audioCtx) return; isNormalizeOn = false; connectGraph(); normalizeBtn.style.color = '';    }
+
+    const boostBtn = document.createElement('button');
+    boostBtn.className = 'plyr__controls__item plyr__control';
+    boostBtn.title = 'Boost Volume ON/OFF';
+    boostBtn.style.fontSize = '18px';
+    boostBtn.innerHTML = `<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M7 2v10h3v10l7-12h-4l4-8H7z"/></svg>`;
+    boostBtn.addEventListener('click', () => { isBoostOn ? toggleBoostOff() : toggleBoostOn(); });
+
+    const normalizeBtn = document.createElement('button');
+    normalizeBtn.className = 'plyr__controls__item plyr__control';
+    normalizeBtn.title = 'Normalizar audio ON/OFF';
+    normalizeBtn.style.fontSize = '18px';
+    normalizeBtn.innerHTML = `
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+        <path d="M3 12h2v6H3v-6zm4-4h2v10H7V8zm4-3h2v16h-2V5zm4 6h2v8h-2v-8zm4-2h2v10h-2V9z"/>
+      </svg>`;
+    normalizeBtn.addEventListener('click', () => {
+      isNormalizeOn ? toggleNormalizeOff() : toggleNormalizeOn();
+    });
+
+    // ===== Player listo =====
+    player.on('ready', () => {
+      const controls  = player.elements.controls;
+      const progress  = player.elements.progress;
+      const container = player.elements.container;
+      if (controls) {
+        controls.appendChild(boostBtn);
+        controls.appendChild(normalizeBtn);
+      }
+
+      /* === Indicador de tiempo sobre la barra === */
+      const timeIndicator = document.createElement('div');
+      timeIndicator.className = 'plyr__time-indicator';
+      timeIndicator.textContent = '00:00';
+      progress.appendChild(timeIndicator);
+
+      function formatTime(seconds) {
+        const hrs  = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
+        const secs = Math.floor(seconds % 60);
+        return [hrs > 0 ? String(hrs).padStart(2,'0') : null, String(mins).padStart(2,'0'), String(secs).padStart(2,'0')]
+               .filter(Boolean).join(':');
+      }
+
+      let lastUpdate = 0;
+
+function updateIndicator() {
+  const now = performance.now();
+  if (now - lastUpdate < 100) return; // 🔥 limita a 10fps
+  lastUpdate = now;
+
+  const duration = player.duration || 0.00001;
+  const current  = player.currentTime || 0;
+  const percent  = (current / duration) * 100;
+  const barWidth = progress.offsetWidth;
+  const left     = (percent / 100) * barWidth;
+
+  timeIndicator.style.left = `${left}px`;
+  timeIndicator.textContent = formatTime(current);
+}
+
+      // Se actualiza durante la reproducción
+      let indicatorInterval = setInterval(updateIndicator, 100);
+      video.addEventListener('pause', () => clearInterval(indicatorInterval));
+      video.addEventListener('play', () => {
+  clearInterval(indicatorInterval); // 🔥 evita duplicados
+  indicatorInterval = setInterval(updateIndicator, 100);
+});
+      window.addEventListener('resize', updateIndicator);
+
+      // Mostrar/ocultar el globito con hover del contenedor + sincronizar título
+container.addEventListener('mouseenter', () => {
+  container.classList.add('plyr--hover');
+  titleBanner.classList.add('show');
+});      
+container.addEventListener('mouseleave', () => {
+  container.classList.remove('plyr--hover');
+
+  // 👉 solo ocultar si está reproduciendo
+  if (!video.paused) {
+    titleBanner.classList.remove('show');
+  }
+});
+
+      /* ===== FIX: blur al botón de settings al usarlo/cerrar menú ===== */
+      const settingsBtn = controls?.querySelector('[data-plyr="settings"]');
+      const menu = document.querySelector('.plyr__menu__container');
+
+      if (settingsBtn) {
+        // Al hacer click (abrir/cerrar), quitar foco en el siguiente tick
+        settingsBtn.addEventListener('click', () => setTimeout(() => settingsBtn.blur(), 0));
+        // Si se hace click fuera del menú y del botón, quitar foco
+        document.addEventListener('click', (e) => {
+          if (!menu) return;
+          const clickDentroMenu = menu.contains(e.target);
+          const clickEnBoton = e.target === settingsBtn || settingsBtn.contains(e.target);
+          if (!clickDentroMenu && !clickEnBoton) settingsBtn.blur();
+        });
+      }
+    });
+
+    // === Ocultar el globito de tiempo mientras se busca (drag) ===
+    player.on('seeking', () => {
+      player.elements.container.classList.add('plyr--seeking');
+    });
+    player.on('seeked', () => {
+      player.elements.container.classList.remove('plyr--seeking');
+    });
+
+    // === Ocultar también cuando SOLO pasas por la barra (hover/scrub) ===
+    (function attachScrubHandlers(){
+      const progressEl   = player.elements.progress;
+      const progressRange = progressEl?.querySelector('input[type="range"]');
+
+      if (progressEl) {
+        progressEl.addEventListener('mouseenter', () => {
+          player.elements.container.classList.add('plyr--scrubbing');
+        });
+        progressEl.addEventListener('mouseleave', () => {
+          player.elements.container.classList.remove('plyr--scrubbing');
+        });
+      }
+
+      if (progressRange) {
+        ['pointerdown','mousedown','touchstart'].forEach(evt => {
+          progressRange.addEventListener(evt, () => {
+            player.elements.container.classList.add('plyr--scrubbing');
+          }, { passive: true });
+        });
+        ['pointerup','mouseup','touchend','touchcancel','change'].forEach(evt => {
+          progressRange.addEventListener(evt, () => {
+            player.elements.container.classList.remove('plyr--scrubbing');
+          }, { passive: true });
+        });
+      }
+
+      // Seguridad: si el puntero sale del contenedor, limpiamos ambas clases
+      player.elements.container.addEventListener('mouseleave', () => {
+        player.elements.container.classList.remove('plyr--scrubbing','plyr--seeking');
+      });
+    })();
+
+    // ===== Overlay play/pause =====
+    function showOverlayIcon(type) {
+      overlayIcon.innerHTML = type === 'play'
+        ? `<path d="M8 5v14l11-7z"/>`
+        : `<path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/>`;
+      overlay.classList.add('show');
+      clearTimeout(showOverlayIcon._timeout);
+      showOverlayIcon._timeout = setTimeout(() => overlay.classList.remove('show'), 300);
+    }
+
+    let ignoreNextPlay = false;
+    player.on('seeking', () => { ignoreNextPlay = true; });
+    player.on('play', () => {
+  if (ignoreNextPlay) { ignoreNextPlay = false; return; }
+  showOverlayIcon('play');
+
+  // 👉 Al reproducir: ocultar título
+  titleBanner.classList.remove('show');
+});
+
+player.on('pause', () => {
+  if (!player.seeking) showOverlayIcon('pause');
+
+  // 👉 Al pausar: mostrar título fijo
+  titleBanner.classList.add('show');
+  clearTimeout(bannerHideTO);
+});
+
+
+    // Click en el video = play/pause
+    video.addEventListener('click', () => { video.paused ? player.play() : player.pause(); });
+
+    // Pantalla completa: mover overlay y banner al contenedor del player
+    player.on('enterfullscreen', () => {
+      player.elements.container.appendChild(overlay);
+      player.elements.container.appendChild(titleBanner);
+    });
+    player.on('exitfullscreen', () => {
+      videoContainer.appendChild(overlay);
+      videoContainer.appendChild(titleBanner);
+    });
+
+    /* ====== UTIL: saber si el foco está en la UI de Plyr ====== */
+    function isFocusInPlyrUI() {
+      const ae = document.activeElement;
+      return !!(ae && (ae.closest('.plyr__controls') || ae.closest('.plyr__menu__container')));
+    }
+
+    // ===== Teclas rápidas =====
+    document.addEventListener('keydown', (event) => {
+      // No interferir con inputs de archivos
+      if (event.target.tagName.toLowerCase() === 'input') return;
+
+      const key = event.key.toLowerCase();
+
+      if (key === ' ') {
+        // Si hay foco en controles o menú, evita que Space "clickee" el botón enfocado
+        if (isFocusInPlyrUI()) {
+          event.preventDefault();
+          document.activeElement && document.activeElement.blur(); // limpiar foco para el próximo Space
+          video.focus?.();
+          player.togglePlay();
+          return;
+        }
+        // Si el foco no está en la UI, Space funciona normal para play/pause
+        event.preventDefault();
+        player.togglePlay();
+      } else if (key === 'f') {
+        player.fullscreen.toggle();
+      } else if (event.key === 'ArrowRight') {
+        player.forward(10);
+      } else if (event.key === 'ArrowLeft') {
+        player.rewind(10);
+      } else if (key === 'b') {
+        isBoostOn ? toggleBoostOff() : toggleBoostOn();
+      } else if (key === 'n') {
+        isNormalizeOn ? toggleNormalizeOff() : toggleNormalizeOn();
+      } else if (key === 'm') {
+        player.muted = !player.muted;
+      } else if (key === 's') {
+        subtitleInput.click();
+      } else if (key === 'v') {
+        fileInput.click();
+      }
+    }, true); // <-- capture: true para ganar al click implícito en keyup
+
+    // Sincroniza banner con los controles
+    player.on('controlsshown',  () => titleBanner.classList.add('show'));
+    player.on('controlshidden', () => titleBanner.classList.remove('show'));
+
+    // Mostrar banner al mover mouse (y ocultar por inactividad)
+    let bannerHideTO;
+    function showBanner() {
+  // Solo si está reproduciendo
+  if (!video.paused) {
+    titleBanner.classList.add('show');
+    clearTimeout(bannerHideTO);
+
+    bannerHideTO = setTimeout(() => {
+      // solo se oculta si sigue reproduciendo
+      if (!video.paused) {
+        titleBanner.classList.remove('show');
+      }
+    }, 2000); // 👈 2 segundos
+  }
+}
+
+videoContainer.addEventListener('mousemove', showBanner);
+
+    // Fallback: usar nombre de archivo desde la URL si aplica
+    video.addEventListener('loadedmetadata', () => {
+      if (!videoTitleEl.textContent || videoTitleEl.textContent === 'Sin título') {
+        try {
+          const url = new URL(video.currentSrc);
+          const name = decodeURIComponent(url.pathname.split('/').pop() || '');
+          if (name) setBannerTitleFromFile(name);
+        } catch(_) {}
+      }
+    });
+
+    /* ====== JS ANTI-FOCO (quita el rayado tras clic+Espacio) ====== */
+    function defocusControls() {
+      const controls = player.elements.controls;
+      if (!controls) return;
+
+      // botones, inputs y labels del panel
+      const els = controls.querySelectorAll('button, input, label');
+      els.forEach(el => {
+        ['mouseup', 'touchend', 'pointerup'].forEach(evt => {
+          el.addEventListener(evt, () => el.blur(), { passive: true });
+        });
+      });
+
+      // en especial el slider de progreso (range)
+      const progressRange = player.elements.progress?.querySelector('input[type="range"]');
+      if (progressRange) {
+        ['mousedown', 'pointerdown', 'touchstart', 'change', 'input'].forEach(evt => {
+          progressRange.addEventListener(evt, () => progressRange.blur(), { passive: true });
+        });
+      }
+    }
+    player.on('ready', defocusControls);
+  </script>
+</body>
+</html>
